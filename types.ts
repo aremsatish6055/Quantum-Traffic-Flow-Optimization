@@ -22,6 +22,7 @@ export interface Intersection {
   // N, S, E, W
   lights: [TrafficLight, TrafficLight, TrafficLight, TrafficLight];
   manualOverride: boolean;
+  emergencyOverrideFor?: Direction | null;
 }
 
 export type Direction = 'N' | 'S' | 'E' | 'W';
@@ -37,6 +38,8 @@ export interface Vehicle {
   waitTime: number;
   isEmergency: boolean;
   collisionTimestamp?: number;
+  destination?: { gridX: number; gridY: number };
+  path?: { gridX: number; gridY: number }[];
 }
 
 export interface SimulationStats {

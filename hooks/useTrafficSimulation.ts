@@ -17,6 +17,69 @@ const JAM_STOPPED_RATIO_THRESHOLD = 0.66; // Min ratio of stopped cars in the se
 // Collision Detection Constants
 const COLLISION_FLASH_DURATION_TICKS = 1 * TICKS_PER_SECOND; // 1 second
 
+// A* Pathfinding implementation
+const findPath = (start: { gridX: number; gridY: number }, end: { gridX: number; gridY: number }): { gridX: number; gridY: number }[] => {
+    const nodes = new Map<string, any>();
+    const openSet = new Set<string>();
+    const startKey = `${start.gridX},${start.gridY}`;
+    const endKey = `${end.gridX},${end.gridY}`;
+
+    nodes.set(startKey, {
+        g: 0,
+        h: Math.abs(start.gridX - end.gridX) + Math.abs(start.gridY - end.gridY),
+        f: Math.abs(start.gridX - end.gridX) + Math.abs(start.gridY - end.gridY),
+        parent: null,
+    });
+    openSet.add(startKey);
+
+    while (openSet.size > 0) {
+        let currentKey = openSet.values().next().value;
+        for (const key of openSet) {
+            if (nodes.get(key).f < nodes.get(currentKey).f) {
+                currentKey = key;
+            }
+        }
+
+        if (currentKey === endKey) {
+            const path = [];
+            let tempKey = currentKey;
+            while (tempKey) {
+                const [x, y] = tempKey.split(',').map(Number);
+                path.unshift({ gridX: x, gridY: y });
+                tempKey = nodes.get(tempKey).parent;
+            }
+            return path.slice(1);
+        }
+
+        openSet.delete(currentKey);
+        const [currentX, currentY] = currentKey.split(',').map(Number);
+        const currentNode = nodes.get(currentKey);
+
+        const neighbors = [
+            { gridX: currentX + 1, gridY: currentY },
+            { gridX: currentX - 1, gridY: currentY },
+            { gridX: currentX, gridY: currentY + 1 },
+            { gridX: currentX, gridY: currentY - 1 },
+        ].filter(n => n.gridX >= 0 && n.gridX < GRID_SIZE && n.gridY >= 0 && n.gridY < GRID_SIZE);
+
+        for (const neighbor of neighbors) {
+            const neighborKey = `${neighbor.gridX},${neighbor.gridY}`;
+            const gScore = currentNode.g + 1;
+            const hScore = Math.abs(neighbor.gridX - end.gridX) + Math.abs(neighbor.gridY - end.gridY);
+            const fScore = gScore + hScore;
+
+            if (!nodes.has(neighborKey) || fScore < nodes.get(neighborKey).f) {
+                nodes.set(neighborKey, { g: gScore, h: hScore, f: fScore, parent: currentKey });
+                if (!openSet.has(neighborKey)) {
+                    openSet.add(neighborKey);
+                }
+            }
+        }
+    }
+    return []; // No path found
+};
+
+
 const useTrafficSimulation = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [simulationSpeed, setSimulationSpeed] = useState(1);
@@ -33,6 +96,7 @@ const useTrafficSimulation = () => {
         { state: i % 2 === 0 ? LightState.RED : LightState.GREEN, timer: INITIAL_LIGHT_DURATION },
       ],
       manualOverride: false,
+      emergencyOverrideFor: null,
     }))
   );
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -67,8 +131,16 @@ const useTrafficSimulation = () => {
   const updateLights = useCallback(() => {
     setIntersections(prev =>
       prev.map(intersection => {
-        if (intersection.manualOverride) {
-            return intersection;
+        if (intersection.manualOverride) return intersection;
+
+        if (intersection.emergencyOverrideFor) {
+            const newLights = [...intersection.lights];
+            const dir = intersection.emergencyOverrideFor;
+            newLights[0].state = (dir === 'N' || dir === 'S') ? LightState.GREEN : LightState.RED;
+            newLights[1].state = (dir === 'N' || dir === 'S') ? LightState.GREEN : LightState.RED;
+            newLights[2].state = (dir === 'E' || dir === 'W') ? LightState.GREEN : LightState.RED;
+            newLights[3].state = (dir === 'E' || dir === 'W') ? LightState.GREEN : LightState.RED;
+            return {...intersection, lights: newLights as [any, any, any, any] };
         }
 
         const newLights = [...intersection.lights];
@@ -170,7 +242,7 @@ const useTrafficSimulation = () => {
 
       // 1. First pass: update positions and clear old collision flags
       let movedVehicles = prevVehicles.map(vehicle => {
-        const newVehicle = { ...vehicle };
+        let newVehicle = { ...vehicle };
 
         // Clear old collision flag
         if (newVehicle.collisionTimestamp && simulationTick.current - newVehicle.collisionTimestamp > COLLISION_FLASH_DURATION_TICKS) {
@@ -179,6 +251,29 @@ const useTrafficSimulation = () => {
 
         const gridX = Math.floor(newVehicle.x / CELL_SIZE);
         const gridY = Math.floor(newVehicle.y / CELL_SIZE);
+
+        // Emergency vehicle routing
+        if (newVehicle.isEmergency && newVehicle.path && newVehicle.path.length > 0) {
+            const intersectionCenterX = gridX * CELL_SIZE + INTERSECTION_SIZE / 2;
+            const intersectionCenterY = gridY * CELL_SIZE + INTERSECTION_SIZE / 2;
+            const distToCenter = Math.hypot(newVehicle.x - intersectionCenterX, newVehicle.y - intersectionCenterY);
+
+            if (distToCenter < 15) { // Close to center, decide next direction
+                const currentPathNodeIndex = newVehicle.path.findIndex(p => p.gridX === gridX && p.gridY === gridY);
+                if (currentPathNodeIndex !== -1 && currentPathNodeIndex + 1 < newVehicle.path.length) {
+                    const nextNode = newVehicle.path[currentPathNodeIndex + 1];
+                    const dx = nextNode.gridX - gridX;
+                    const dy = nextNode.gridY - gridY;
+
+                    if (dx > 0) newVehicle.direction = 'E';
+                    else if (dx < 0) newVehicle.direction = 'W';
+                    else if (dy > 0) newVehicle.direction = 'S';
+                    else if (dy < 0) newVehicle.direction = 'N';
+                } else if (newVehicle.path[0].gridX === newVehicle.destination?.gridX && newVehicle.path[0].gridY === newVehicle.destination?.gridY) {
+                     // Reached destination
+                }
+            }
+        }
         
         const isNearIntersection = (pos: number, dir: 'x' | 'y') => {
             const posInCell = pos % CELL_SIZE;
@@ -248,7 +343,7 @@ const useTrafficSimulation = () => {
                 continue;
             }
 
-            const dist = Math.hypot(vehicleA.x - vehicleB.x, vehicleA.y - vehicleB.y);
+            const dist = Math.hypot(vehicleA.x - vehicleB.x, vehicleB.y - vehicleA.y);
             const collisionThreshold = 15; // A bit more than half the length of a car
 
             if (dist < collisionThreshold) {
@@ -336,6 +431,47 @@ const useTrafficSimulation = () => {
 
 }, [vehicles, addLog]);
 
+  const prioritizeEmergencyPath = useCallback(() => {
+    const emergencyVehicle = vehicles.find(v => v.isEmergency);
+    if (!emergencyVehicle || !emergencyVehicle.path) {
+        setIntersections(prev => prev.map(i => i.emergencyOverrideFor ? { ...i, emergencyOverrideFor: null } : i));
+        return;
+    }
+
+    const newOverrides = new Map<number, Direction>();
+    const currentGridX = Math.floor(emergencyVehicle.x / CELL_SIZE);
+    const currentGridY = Math.floor(emergencyVehicle.y / CELL_SIZE);
+
+    const path = emergencyVehicle.path;
+    const currentPathIndex = path.findIndex(p => p.gridX === currentGridX && p.gridY === currentGridY);
+    
+    // Prioritize next 2 intersections
+    for (let i = currentPathIndex + 1; i < Math.min(path.length, currentPathIndex + 3); i++) {
+        const intersectionNode = path[i];
+        const intersectionId = intersectionNode.gridY * GRID_SIZE + intersectionNode.gridX;
+        
+        const prevNode = i > 0 ? path[i - 1] : { gridX: currentGridX, gridY: currentGridY };
+        
+        let approachDir: Direction = emergencyVehicle.direction;
+        const dx = intersectionNode.gridX - prevNode.gridX;
+        const dy = intersectionNode.gridY - prevNode.gridY;
+
+        if (dx > 0) approachDir = 'E';
+        else if (dx < 0) approachDir = 'W';
+        else if (dy > 0) approachDir = 'S';
+        else if (dy < 0) approachDir = 'N';
+
+        newOverrides.set(intersectionId, approachDir);
+    }
+
+    setIntersections(prev => prev.map(i => ({
+        ...i,
+        emergencyOverrideFor: newOverrides.get(i.id) || null,
+    })));
+
+  }, [vehicles]);
+
+
   const updateStats = useCallback(() => {
       simulationTick.current++;
       const totalCars = vehicles.length;
@@ -396,6 +532,7 @@ const useTrafficSimulation = () => {
     const SPAWN_INTERVAL_S = 5;
 
     const interval = setInterval(() => {
+      prioritizeEmergencyPath();
       updateLights();
       moveVehicles(weather);
       if (simulationTick.current % (SPAWN_INTERVAL_S * TICKS_PER_SECOND) === 0) {
@@ -405,7 +542,7 @@ const useTrafficSimulation = () => {
     }, TICK_INTERVAL_MS / simulationSpeed);
 
     return () => clearInterval(interval);
-  }, [isRunning, simulationSpeed, weather, updateLights, moveVehicles, spawnVehicle, updateStats]);
+  }, [isRunning, simulationSpeed, weather, updateLights, moveVehicles, spawnVehicle, updateStats, prioritizeEmergencyPath]);
 
   const handleToggleRun = () => {
     const newIsRunning = !isRunning;
@@ -416,20 +553,40 @@ const useTrafficSimulation = () => {
   const toggleEmergency = () => {
     const newEmergencyState = !stats.emergencyActive;
     setStats(prev => ({...prev, emergencyActive: newEmergencyState}));
-    addLog(newEmergencyState ? 'Emergency Priority Activated!' : 'Emergency Priority Deactivated.', 'emergency');
     
-    setVehicles(prev => {
-        if(prev.some(c => c.isEmergency)){
-            return prev.map(c => ({...c, isEmergency: false}));
-        }
-        if(prev.length > 0){
-            const newVehicles = [...prev];
-            const randomIndex = Math.floor(Math.random() * newVehicles.length);
-            newVehicles[randomIndex].isEmergency = true;
-            return newVehicles;
-        }
-        return prev;
-    });
+    if (newEmergencyState) {
+        addLog('Emergency Priority Activated!', 'emergency');
+        setVehicles(prev => {
+            if (prev.length > 0 && !prev.some(v => v.isEmergency)) {
+                const newVehicles = [...prev];
+                const randomIndex = Math.floor(Math.random() * newVehicles.length);
+                const vehicle = newVehicles[randomIndex];
+                
+                const startGridX = Math.floor(vehicle.x / CELL_SIZE);
+                const startGridY = Math.floor(vehicle.y / CELL_SIZE);
+
+                // Choose a destination far away
+                const destGridX = GRID_SIZE - 1 - startGridX;
+                const destGridY = GRID_SIZE - 1 - startGridY;
+                
+                const path = findPath({ gridX: startGridX, gridY: startGridY }, { gridX: destGridX, gridY: destGridY });
+
+                if (path.length > 0) {
+                    vehicle.isEmergency = true;
+                    vehicle.destination = { gridX: destGridX, gridY: destGridY };
+                    vehicle.path = [{ gridX: startGridX, gridY: startGridY }, ...path];
+                    addLog(`Route calculated for emergency vehicle #${vehicle.id}.`, 'emergency');
+                } else {
+                    addLog(`Could not calculate route for vehicle #${vehicle.id}.`, 'warning');
+                }
+                return newVehicles;
+            }
+            return prev;
+        });
+    } else {
+        addLog('Emergency Priority Deactivated.', 'emergency');
+        setVehicles(prev => prev.map(c => ({...c, isEmergency: false, path: undefined, destination: undefined })));
+    }
   };
 
   const applyQuantumOptimization = () => {

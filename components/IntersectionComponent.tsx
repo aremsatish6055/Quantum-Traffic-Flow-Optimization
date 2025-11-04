@@ -63,6 +63,10 @@ const IntersectionComponent: React.FC<IntersectionComponentProps> = ({ intersect
     const manualOverrideClass = intersection.manualOverride
         ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-800 animate-pulse'
         : '';
+    
+    const emergencyOverrideClass = intersection.emergencyOverrideFor
+        ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-gray-800 animate-pulse'
+        : '';
 
     const TimerDisplay: React.FC<{ timer: number, className?: string }> = ({ timer, className = '' }) => (
         <div className={`text-xs font-mono text-gray-300 w-8 text-center ${className}`}>
@@ -72,7 +76,7 @@ const IntersectionComponent: React.FC<IntersectionComponentProps> = ({ intersect
 
     return (
         <div
-            className={`absolute bg-gray-800 cursor-pointer rounded-md hover:ring-2 hover:ring-indigo-400 transition-all overflow-hidden ${manualOverrideClass}`}
+            className={`absolute bg-gray-800 cursor-pointer rounded-md hover:ring-2 hover:ring-indigo-400 transition-all overflow-hidden ${manualOverrideClass} ${emergencyOverrideClass}`}
             style={{
                 left: `${x}px`,
                 top: `${y}px`,

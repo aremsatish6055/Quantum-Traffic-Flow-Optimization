@@ -1,5 +1,5 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Vehicle, VehicleType } from '../types';
 
 interface VehicleComponentProps {
@@ -24,6 +24,8 @@ const SirenIndicator: React.FC = () => (
 );
 
 const VehicleComponent: React.FC<VehicleComponentProps> = ({ vehicle }) => {
+    const [isHovered, setIsHovered] = useState(false);
+
     const rotation = {
         'N': -90,
         'S': 90,
@@ -80,10 +82,31 @@ const VehicleComponent: React.FC<VehicleComponentProps> = ({ vehicle }) => {
                 left: `${vehicle.x}px`, 
                 top: `${vehicle.y}px`,
                 transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-                boxShadow: finalShadow
+                boxShadow: finalShadow,
+                zIndex: isHovered ? 10 : 1,
              }}
+             onMouseEnter={() => setIsHovered(true)}
+             onMouseLeave={() => setIsHovered(false)}
         >
             {isEmergency && <SirenIndicator />}
+            <AnimatePresence>
+                {isHovered && (
+                    <motion.div
+                        className="absolute bottom-full mb-2 px-2 py-0.5 bg-black/80 text-white text-xs rounded-md whitespace-nowrap"
+                        style={{
+                            left: '50%',
+                            transform: `translateX(-50%) rotate(${-rotation}deg)`,
+                            transformOrigin: 'bottom center',
+                        }}
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 5 }}
+                        transition={{ duration: 0.2 }}
+                    >
+                        ID: {vehicle.id}
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };
