@@ -6,14 +6,23 @@ const LANE_WIDTH = 50; // pixels
 const INTERSECTION_SIZE = 100; // pixels
 const CELL_SIZE = LANE_WIDTH * 2 + INTERSECTION_SIZE;
 
-const INITIAL_LIGHT_DURATION = 20; // in simulation ticks
-const YELLOW_LIGHT_DURATION = 5;
+const TICKS_PER_SECOND = 10;
+const INITIAL_LIGHT_DURATION = 2 * TICKS_PER_SECOND; // 2 seconds
+const YELLOW_LIGHT_DURATION = 0.5 * TICKS_PER_SECOND; // 0.5 seconds
+
+// Traffic Jam Detection Constants
+const JAM_VEHICLE_THRESHOLD = 3; // Min vehicles to be considered a potential jam
+const JAM_STOPPED_RATIO_THRESHOLD = 0.66; // Min ratio of stopped cars in the segment
+
+// Collision Detection Constants
+const COLLISION_FLASH_DURATION_TICKS = 1 * TICKS_PER_SECOND; // 1 second
 
 const useTrafficSimulation = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [simulationSpeed, setSimulationSpeed] = useState(1);
   const [weather, setWeather] = useState<WeatherCondition>('Clear');
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [jammedSegments, setJammedSegments] = useState<string[]>([]);
   const [intersections, setIntersections] = useState<Intersection[]>(() =>
     Array.from({ length: GRID_SIZE * GRID_SIZE }, (_, i) => ({
       id: i,
@@ -43,6 +52,7 @@ const useTrafficSimulation = () => {
   const simulationTick = useRef(0);
   const vehicleIdCounter = useRef(0);
   const vehicleThroughput = useRef(0);
+  const previousJams = useRef<string[]>([]);
 
   const addLog = useCallback((message: string, type: LogEntry['type']) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -158,28 +168,36 @@ const useTrafficSimulation = () => {
         }
       };
 
-      const newVehicles = prevVehicles.map(vehicle => {
-        const gridX = Math.floor(vehicle.x / CELL_SIZE);
-        const gridY = Math.floor(vehicle.y / CELL_SIZE);
+      // 1. First pass: update positions and clear old collision flags
+      let movedVehicles = prevVehicles.map(vehicle => {
+        const newVehicle = { ...vehicle };
+
+        // Clear old collision flag
+        if (newVehicle.collisionTimestamp && simulationTick.current - newVehicle.collisionTimestamp > COLLISION_FLASH_DURATION_TICKS) {
+            delete newVehicle.collisionTimestamp;
+        }
+
+        const gridX = Math.floor(newVehicle.x / CELL_SIZE);
+        const gridY = Math.floor(newVehicle.y / CELL_SIZE);
         
         const isNearIntersection = (pos: number, dir: 'x' | 'y') => {
             const posInCell = pos % CELL_SIZE;
             if (dir === 'x') {
-                return (vehicle.direction === 'E' && posInCell > CELL_SIZE - INTERSECTION_SIZE - LANE_WIDTH-10 && posInCell < CELL_SIZE - INTERSECTION_SIZE - LANE_WIDTH) ||
-                       (vehicle.direction === 'W' && posInCell < INTERSECTION_SIZE + LANE_WIDTH && posInCell > INTERSECTION_SIZE + LANE_WIDTH-10);
+                return (newVehicle.direction === 'E' && posInCell > CELL_SIZE - INTERSECTION_SIZE - LANE_WIDTH-10 && posInCell < CELL_SIZE - INTERSECTION_SIZE - LANE_WIDTH) ||
+                       (newVehicle.direction === 'W' && posInCell < INTERSECTION_SIZE + LANE_WIDTH && posInCell > INTERSECTION_SIZE + LANE_WIDTH-10);
             } else { // dir 'y'
-                 return (vehicle.direction === 'S' && posInCell > CELL_SIZE - INTERSECTION_SIZE - LANE_WIDTH-10 && posInCell < CELL_SIZE - INTERSECTION_SIZE - LANE_WIDTH) ||
-                       (vehicle.direction === 'N' && posInCell < INTERSECTION_SIZE + LANE_WIDTH && posInCell > INTERSECTION_SIZE + LANE_WIDTH-10);
+                 return (newVehicle.direction === 'S' && posInCell > CELL_SIZE - INTERSECTION_SIZE - LANE_WIDTH-10 && posInCell < CELL_SIZE - INTERSECTION_SIZE - LANE_WIDTH) ||
+                       (newVehicle.direction === 'N' && posInCell < INTERSECTION_SIZE + LANE_WIDTH && posInCell > INTERSECTION_SIZE + LANE_WIDTH-10);
             }
         };
 
         let stop = false;
         
         if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
-            if (isNearIntersection(vehicle.x, 'x') || isNearIntersection(vehicle.y, 'y')) {
+            if (isNearIntersection(newVehicle.x, 'x') || isNearIntersection(newVehicle.y, 'y')) {
                 const intersection = intersections[gridY * GRID_SIZE + gridX];
                 if(intersection){
-                    const lightIndex = {'N': 0, 'S': 1, 'E': 2, 'W': 3}[vehicle.direction];
+                    const lightIndex = {'N': 0, 'S': 1, 'E': 2, 'W': 3}[newVehicle.direction];
                     const light = intersection.lights[lightIndex];
                     if (light.state === LightState.RED || light.state === LightState.YELLOW) {
                         stop = true;
@@ -190,21 +208,20 @@ const useTrafficSimulation = () => {
         
         if (!stop) {
             for (const otherVehicle of prevVehicles) {
-                if (vehicle.id === otherVehicle.id) continue;
-                const dist = Math.hypot(vehicle.x - otherVehicle.x, vehicle.y - otherVehicle.y);
-                const safetyDistance = vehicle.type === VehicleType.BUS ? 30 : 20;
+                if (newVehicle.id === otherVehicle.id) continue;
+                const dist = Math.hypot(newVehicle.x - otherVehicle.x, newVehicle.y - otherVehicle.y);
+                const safetyDistance = newVehicle.type === VehicleType.BUS ? 30 : 20;
                 if (dist < safetyDistance) {
-                     if (vehicle.direction === 'N' && vehicle.y > otherVehicle.y) stop = true;
-                     else if (vehicle.direction === 'S' && vehicle.y < otherVehicle.y) stop = true;
-                     else if (vehicle.direction === 'E' && vehicle.x < otherVehicle.x) stop = true;
-                     else if (vehicle.direction === 'W' && vehicle.x > otherVehicle.x) stop = true;
+                     if (newVehicle.direction === 'N' && newVehicle.y > otherVehicle.y) stop = true;
+                     else if (newVehicle.direction === 'S' && newVehicle.y < otherVehicle.y) stop = true;
+                     else if (newVehicle.direction === 'E' && newVehicle.x < otherVehicle.x) stop = true;
+                     else if (newVehicle.direction === 'W' && newVehicle.x > otherVehicle.x) stop = true;
                      if(stop) break;
                 }
             }
         }
 
-        const newVehicle = { ...vehicle };
-        newVehicle.stopped = stop && !vehicle.isEmergency;
+        newVehicle.stopped = stop && !newVehicle.isEmergency;
         if(newVehicle.stopped) {
             newVehicle.waitTime += 1;
         } else {
@@ -220,14 +237,104 @@ const useTrafficSimulation = () => {
         return newVehicle;
       });
 
-      const survivingVehicles = newVehicles.filter(vehicle => vehicle.x > -50 && vehicle.x < GRID_SIZE * CELL_SIZE + 50 && vehicle.y > -50 && vehicle.y < GRID_SIZE * CELL_SIZE + 50);
-      const exitedVehicleCount = newVehicles.length - survivingVehicles.length;
+      // 2. Second pass: detect collisions on the new positions
+      const collidedThisTick = new Set<number>();
+      for (let i = 0; i < movedVehicles.length; i++) {
+        for (let j = i + 1; j < movedVehicles.length; j++) {
+            const vehicleA = movedVehicles[i];
+            const vehicleB = movedVehicles[j];
+
+            if (collidedThisTick.has(vehicleA.id) || collidedThisTick.has(vehicleB.id)) {
+                continue;
+            }
+
+            const dist = Math.hypot(vehicleA.x - vehicleB.x, vehicleA.y - vehicleB.y);
+            const collisionThreshold = 15; // A bit more than half the length of a car
+
+            if (dist < collisionThreshold) {
+                // Collision detected!
+                vehicleA.collisionTimestamp = simulationTick.current;
+                vehicleB.collisionTimestamp = simulationTick.current;
+                
+                vehicleA.stopped = true;
+                vehicleB.stopped = true;
+
+                collidedThisTick.add(vehicleA.id);
+                collidedThisTick.add(vehicleB.id);
+
+                addLog(`Collision detected between vehicle #${vehicleA.id} and #${vehicleB.id}.`, 'warning');
+            }
+        }
+      }
+
+      const survivingVehicles = movedVehicles.filter(vehicle => vehicle.x > -50 && vehicle.x < GRID_SIZE * CELL_SIZE + 50 && vehicle.y > -50 && vehicle.y < GRID_SIZE * CELL_SIZE + 50);
+      const exitedVehicleCount = movedVehicles.length - survivingVehicles.length;
       if (exitedVehicleCount > 0) {
         vehicleThroughput.current += exitedVehicleCount;
       }
       return survivingVehicles;
     });
-  }, [intersections]);
+  }, [intersections, addLog]);
+  
+  const detectJams = useCallback(() => {
+    const newJammedSegments: string[] = [];
+
+    // Check horizontal segments
+    for (let i = 0; i < GRID_SIZE; i++) {
+        for (let j = 0; j < GRID_SIZE - 1; j++) {
+            const segmentId = `H-${i}-${j}`;
+            const xMin = j * CELL_SIZE + INTERSECTION_SIZE;
+            const xMax = (j + 1) * CELL_SIZE;
+            const yMin = i * CELL_SIZE + INTERSECTION_SIZE / 2;
+            const yMax = yMin + LANE_WIDTH * 2;
+
+            const vehiclesInSegment = vehicles.filter(v => 
+                v.x > xMin && v.x < xMax && v.y > yMin && v.y < yMax
+            );
+
+            if (vehiclesInSegment.length >= JAM_VEHICLE_THRESHOLD) {
+                const stoppedCount = vehiclesInSegment.filter(v => v.stopped).length;
+                if (stoppedCount / vehiclesInSegment.length >= JAM_STOPPED_RATIO_THRESHOLD) {
+                    newJammedSegments.push(segmentId);
+                }
+            }
+        }
+    }
+
+    // Check vertical segments
+    for (let i = 0; i < GRID_SIZE - 1; i++) {
+        for (let j = 0; j < GRID_SIZE; j++) {
+            const segmentId = `V-${i}-${j}`;
+            const xMin = j * CELL_SIZE + INTERSECTION_SIZE / 2;
+            const xMax = xMin + LANE_WIDTH * 2;
+            const yMin = i * CELL_SIZE + INTERSECTION_SIZE;
+            const yMax = (i + 1) * CELL_SIZE;
+
+            const vehiclesInSegment = vehicles.filter(v => 
+                v.x > xMin && v.x < xMax && v.y > yMin && v.y < yMax
+            );
+
+            if (vehiclesInSegment.length >= JAM_VEHICLE_THRESHOLD) {
+                const stoppedCount = vehiclesInSegment.filter(v => v.stopped).length;
+                if (stoppedCount / vehiclesInSegment.length >= JAM_STOPPED_RATIO_THRESHOLD) {
+                    newJammedSegments.push(segmentId);
+                }
+            }
+        }
+    }
+    
+    // Log new jams
+    newJammedSegments.forEach(id => {
+        if (!previousJams.current.includes(id)) {
+            const readableId = id.replace('H', 'Horizontal').replace('V', 'Vertical');
+            addLog(`High congestion detected in segment ${readableId}.`, 'warning');
+        }
+    });
+    
+    previousJams.current = newJammedSegments;
+    setJammedSegments(newJammedSegments);
+
+}, [vehicles, addLog]);
 
   const updateStats = useCallback(() => {
       simulationTick.current++;
@@ -235,7 +342,7 @@ const useTrafficSimulation = () => {
       const movingCars = vehicles.filter(c => !c.stopped).length;
       const totalWaitTime = vehicles.reduce((acc, car) => acc + car.waitTime, 0);
       const totalIdleTime = vehicles.filter(c => c.stopped).reduce((acc, car) => acc + car.waitTime, 0);
-      const averageWaitTime = totalCars > 0 ? totalWaitTime / totalCars / 10 : 0; // rough seconds
+      const averageWaitTime = totalCars > 0 ? totalWaitTime / totalCars / TICKS_PER_SECOND : 0;
       
       const vehicleCounts = {
         cars: vehicles.filter(v => v.type === VehicleType.CAR).length,
@@ -243,11 +350,15 @@ const useTrafficSimulation = () => {
         buses: vehicles.filter(v => v.type === VehicleType.BUS).length,
       };
 
-      if(simulationTick.current % 10 === 0) {
+      if(simulationTick.current % TICKS_PER_SECOND === 0) {
         setStats(prev => ({
           ...prev,
           historicalWaitTime: [...prev.historicalWaitTime, {time: simulationTick.current, wait: averageWaitTime}].slice(-50)
         }));
+      }
+      
+      if(simulationTick.current % (TICKS_PER_SECOND / 2) === 0) { // Check for jams twice per second
+        detectJams();
       }
 
       let sensorAccuracy = 100;
@@ -275,20 +386,23 @@ const useTrafficSimulation = () => {
       });
 
       setStats(prev => ({...prev, totalCars, movingCars, averageWaitTime, trafficDensity, vehicleThroughput: vehicleThroughput.current, totalIdleTime, vehicleCounts, sensorAccuracy}));
-  }, [vehicles, weather]);
+  }, [vehicles, weather, detectJams]);
 
 
   useEffect(() => {
     if (!isRunning) return;
 
+    const TICK_INTERVAL_MS = 1000 / TICKS_PER_SECOND;
+    const SPAWN_INTERVAL_S = 5;
+
     const interval = setInterval(() => {
       updateLights();
       moveVehicles(weather);
-      if (simulationTick.current % 50 === 0) {
+      if (simulationTick.current % (SPAWN_INTERVAL_S * TICKS_PER_SECOND) === 0) {
         spawnVehicle();
       }
       updateStats();
-    }, 100 / simulationSpeed);
+    }, TICK_INTERVAL_MS / simulationSpeed);
 
     return () => clearInterval(interval);
   }, [isRunning, simulationSpeed, weather, updateLights, moveVehicles, spawnVehicle, updateStats]);
@@ -361,7 +475,7 @@ const useTrafficSimulation = () => {
   }, [addLog]);
 
 
-  return { isRunning, setIsRunning: handleToggleRun, simulationSpeed, setSimulationSpeed, weather, setWeather: handleSetWeather, intersections, vehicles, stats, logs, toggleEmergency, applyQuantumOptimization, setLightStateManually, returnToAuto };
+  return { isRunning, setIsRunning: handleToggleRun, simulationSpeed, setSimulationSpeed, weather, setWeather: handleSetWeather, intersections, vehicles, stats, logs, toggleEmergency, applyQuantumOptimization, setLightStateManually, returnToAuto, jammedSegments };
 };
 
 export default useTrafficSimulation;

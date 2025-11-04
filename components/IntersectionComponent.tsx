@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { motion, TargetAndTransition } from 'framer-motion';
 import { Intersection, LightState } from '../types';
@@ -38,7 +37,7 @@ const LightCircle: React.FC<{ color: string; active: boolean; state: LightState 
 const TrafficSignal: React.FC<{ state: LightState; rotation: number }> = ({ state, rotation }) => {
     return (
         <div 
-            className="absolute flex flex-col items-center justify-around w-5 h-12 bg-black/80 rounded-md p-1 border border-gray-600"
+            className="flex flex-col items-center justify-around w-5 h-12 bg-black/80 rounded-md p-1 border border-gray-600"
             style={{ transform: `rotate(${rotation}deg)` }}
         >
             <LightCircle color="red" active={state === LightState.RED} state={state} />
@@ -64,6 +63,12 @@ const IntersectionComponent: React.FC<IntersectionComponentProps> = ({ intersect
     const manualOverrideClass = intersection.manualOverride
         ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-800 animate-pulse'
         : '';
+
+    const TimerDisplay: React.FC<{ timer: number, className?: string }> = ({ timer, className = '' }) => (
+        <div className={`text-xs font-mono text-gray-300 w-8 text-center ${className}`}>
+            {`${Math.ceil(timer / 10)}s`}
+        </div>
+    );
 
     return (
         <div
@@ -97,19 +102,23 @@ const IntersectionComponent: React.FC<IntersectionComponentProps> = ({ intersect
             {/* Traffic Signals positioned at corners */}
             <div className="absolute w-full h-full">
                 {/* For traffic FROM North (bottom right corner of intersection, facing up) */}
-                <div className="absolute" style={{ right: `8px`, bottom: `8px` }}>
+                <div className="absolute flex items-center" style={{ right: `8px`, bottom: `8px` }}>
+                    <TimerDisplay timer={intersection.lights[0].timer} className="mr-1" />
                     <TrafficSignal state={intersection.lights[0].state} rotation={0} />
                 </div>
                 {/* For traffic FROM South (top left corner, facing down) */}
-                <div className="absolute" style={{ left: `8px`, top: `8px` }}>
+                <div className="absolute flex items-center" style={{ left: `8px`, top: `8px` }}>
                     <TrafficSignal state={intersection.lights[1].state} rotation={180} />
+                    <TimerDisplay timer={intersection.lights[1].timer} className="ml-1" />
                 </div>
                  {/* For traffic FROM East (bottom left, facing right) */}
-                <div className="absolute" style={{ left: `8px`, bottom: `8px` }}>
+                <div className="absolute flex flex-col items-center" style={{ left: `8px`, bottom: `8px` }}>
                     <TrafficSignal state={intersection.lights[2].state} rotation={270} />
+                    <TimerDisplay timer={intersection.lights[2].timer} className="mt-1" />
                 </div>
                 {/* For traffic FROM West (top right, facing left) */}
-                <div className="absolute" style={{ right: `8px`, top: `8px` }}>
+                <div className="absolute flex flex-col items-center" style={{ right: `8px`, top: `8px` }}>
+                    <TimerDisplay timer={intersection.lights[3].timer} className="mb-1" />
                     <TrafficSignal state={intersection.lights[3].state} rotation={90} />
                 </div>
             </div>

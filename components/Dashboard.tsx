@@ -25,7 +25,8 @@ const Dashboard: React.FC = () => {
         toggleEmergency, 
         applyQuantumOptimization,
         setLightStateManually,
-        returnToAuto
+        returnToAuto,
+        jammedSegments
     } = useTrafficSimulation();
 
     const [selectedIntersection, setSelectedIntersection] = useState<Intersection | null>(null);
@@ -47,6 +48,7 @@ const Dashboard: React.FC = () => {
                         trafficDensity={stats.trafficDensity}
                         showDensityMap={showDensityMap}
                         weather={weather}
+                        jammedSegments={jammedSegments}
                     />
                 </div>
                 <div className="lg:col-span-1 lg:row-span-1 row-span-1 flex flex-col gap-4 overflow-y-auto pr-2">

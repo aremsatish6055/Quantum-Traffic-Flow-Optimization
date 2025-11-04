@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Intersection, Vehicle, WeatherCondition } from '../types';
 import IntersectionComponent from './IntersectionComponent';
 import VehicleComponent from './CarComponent';
@@ -14,6 +14,7 @@ interface TrafficGridProps {
   trafficDensity: { name: string; density: number }[];
   showDensityMap: boolean;
   weather: WeatherCondition;
+  jammedSegments: string[];
 }
 
 const GRID_SIZE = 3;
@@ -57,8 +58,45 @@ const StreetLabel: React.FC<{ text: string; position: 'top' | 'left'; index: num
     return <div style={style}>{text}</div>;
 };
 
+const LaneArrow: React.FC<{ x: number, y: number, rotation: number, delay: number }> = ({ x, y, rotation, delay }) => (
+    <motion.div
+        className="absolute text-white/20 pointer-events-none"
+        style={{
+            left: `${x}px`,
+            top: `${y}px`,
+            transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+        }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay, duration: 0.5 }}
+    >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 4l8 16H4z" />
+        </svg>
+    </motion.div>
+);
 
-const TrafficGrid: React.FC<TrafficGridProps> = ({ intersections, vehicles, onIntersectionClick, trafficDensity, showDensityMap, weather }) => {
+const JamIndicator: React.FC<{ x: number; y: number; width: number; height: number; }> = ({ x, y, width, height }) => {
+    return (
+        <motion.div
+            className="absolute bg-red-600 rounded-md pointer-events-none"
+            style={{ left: x, top: y, width, height }}
+            initial={{ opacity: 0 }}
+            animate={{
+                opacity: [0.4, 0.7, 0.4],
+                transition: {
+                    duration: 2.5,
+                    repeat: Infinity,
+                    ease: 'easeInOut'
+                }
+            }}
+            exit={{ opacity: 0 }}
+        />
+    );
+};
+
+
+const TrafficGrid: React.FC<TrafficGridProps> = ({ intersections, vehicles, onIntersectionClick, trafficDensity, showDensityMap, weather, jammedSegments }) => {
     const buildingSize = LANE_WIDTH * 2;
 
     return (
@@ -117,6 +155,64 @@ const TrafficGrid: React.FC<TrafficGridProps> = ({ intersections, vehicles, onIn
                         />
                     </React.Fragment>
                 ))}
+
+                {/* Jam Indicators */}
+                <AnimatePresence>
+                {jammedSegments.map(segmentId => {
+                    const parts = segmentId.split('-');
+                    const type = parts[0];
+                    const row = parseInt(parts[1], 10);
+                    const col = parseInt(parts[2], 10);
+                    
+                    let x, y, width, height;
+
+                    if (type === 'H') { // Horizontal segment
+                        x = col * CELL_SIZE + INTERSECTION_SIZE;
+                        y = row * CELL_SIZE + INTERSECTION_SIZE / 2;
+                        width = buildingSize;
+                        height = LANE_WIDTH * 2;
+                    } else { // Vertical segment
+                        x = col * CELL_SIZE + INTERSECTION_SIZE / 2;
+                        y = row * CELL_SIZE + INTERSECTION_SIZE;
+                        width = LANE_WIDTH * 2;
+                        height = buildingSize;
+                    }
+
+                    return <JamIndicator key={segmentId} x={x} y={y} width={width} height={height} />;
+                })}
+                </AnimatePresence>
+
+                {/* Lane Direction Indicators */}
+                {Array.from({ length: GRID_SIZE }).map((_, row) =>
+                    Array.from({ length: GRID_SIZE }).map((_, col) => {
+                        const baseDelay = 1.0;
+                        const stagger = 0.02;
+                        const delay = baseDelay + (row * GRID_SIZE + col) * stagger;
+                        
+                        // Horizontal arrows
+                        const x_h = col * CELL_SIZE + INTERSECTION_SIZE + LANE_WIDTH;
+                        const y_e = row * CELL_SIZE + INTERSECTION_SIZE / 2 + LANE_WIDTH / 2; // Eastbound
+                        const y_w = row * CELL_SIZE + INTERSECTION_SIZE / 2 + LANE_WIDTH * 1.5; // Westbound
+
+                        // Vertical arrows
+                        const y_v = row * CELL_SIZE + INTERSECTION_SIZE + LANE_WIDTH;
+                        const x_s = col * CELL_SIZE + INTERSECTION_SIZE / 2 + LANE_WIDTH / 2; // Southbound
+                        const x_n = col * CELL_SIZE + INTERSECTION_SIZE / 2 + LANE_WIDTH * 1.5; // Northbound
+                        
+                        return (
+                            <React.Fragment key={`arrows-${row}-${col}`}>
+                                {/* Eastbound Arrow (points right) */}
+                                <LaneArrow x={x_h} y={y_e} rotation={90} delay={delay} />
+                                {/* Westbound Arrow (points left) */}
+                                <LaneArrow x={x_h} y={y_w} rotation={-90} delay={delay} />
+                                {/* Southbound Arrow (points down) */}
+                                <LaneArrow x={x_s} y={y_v} rotation={180} delay={delay} />
+                                {/* Northbound Arrow (points up) */}
+                                <LaneArrow x={x_n} y={y_v} rotation={0} delay={delay} />
+                            </React.Fragment>
+                        );
+                    })
+                )}
 
                 {showDensityMap && <DensityOverlay trafficDensity={trafficDensity} />}
 

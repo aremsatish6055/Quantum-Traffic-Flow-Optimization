@@ -36,6 +36,7 @@ export interface Vehicle {
   stopped: boolean;
   waitTime: number;
   isEmergency: boolean;
+  collisionTimestamp?: number;
 }
 
 export interface SimulationStats {
