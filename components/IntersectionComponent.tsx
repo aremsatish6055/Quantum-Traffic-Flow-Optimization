@@ -1,12 +1,14 @@
 import React from 'react';
 import { motion, TargetAndTransition } from 'framer-motion';
 import { Intersection, LightState } from '../types';
+import { CameraIcon } from './icons/Icons';
 
 interface IntersectionComponentProps {
     intersection: Intersection;
     x: number;
     y: number;
     onClick: () => void;
+    onCameraClick: () => void;
 }
 
 const INTERSECTION_SIZE = 100;
@@ -59,7 +61,7 @@ const LaneMarking: React.FC<{ x: number, y: number, isVertical: boolean }> = ({ 
     />
 );
 
-const IntersectionComponent: React.FC<IntersectionComponentProps> = ({ intersection, x, y, onClick }) => {
+const IntersectionComponent: React.FC<IntersectionComponentProps> = ({ intersection, x, y, onClick, onCameraClick }) => {
     const manualOverrideClass = intersection.manualOverride
         ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-800 animate-pulse'
         : '';
@@ -102,6 +104,23 @@ const IntersectionComponent: React.FC<IntersectionComponentProps> = ({ intersect
                     </React.Fragment>
                 ))}
             </div>
+
+            {/* Camera Feed Button */}
+            <div className="absolute inset-0 flex items-center justify-center z-10">
+                <motion.button
+                    onClick={(e) => {
+                        e.stopPropagation(); // Prevent triggering the parent onClick for manual override
+                        onCameraClick();
+                    }}
+                    className="w-8 h-8 rounded-full bg-black/50 hover:bg-indigo-500/80 flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300"
+                    aria-label={`View camera for intersection ${intersection.id + 1}`}
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                >
+                    <CameraIcon />
+                </motion.button>
+            </div>
+
 
             {/* Traffic Signals positioned at corners */}
             <div className="absolute w-full h-full">

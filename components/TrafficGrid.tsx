@@ -11,6 +11,7 @@ interface TrafficGridProps {
   intersections: Intersection[];
   vehicles: Vehicle[];
   onIntersectionClick: (intersection: Intersection) => void;
+  onCameraClick: (intersection: Intersection) => void;
   trafficDensity: { name: string; density: number }[];
   showDensityMap: boolean;
   weather: WeatherCondition;
@@ -96,7 +97,7 @@ const JamIndicator: React.FC<{ x: number; y: number; width: number; height: numb
 };
 
 
-const TrafficGrid: React.FC<TrafficGridProps> = ({ intersections, vehicles, onIntersectionClick, trafficDensity, showDensityMap, weather, jammedSegments }) => {
+const TrafficGrid: React.FC<TrafficGridProps> = ({ intersections, vehicles, onIntersectionClick, onCameraClick, trafficDensity, showDensityMap, weather, jammedSegments }) => {
     const buildingSize = LANE_WIDTH * 2;
 
     return (
@@ -226,6 +227,7 @@ const TrafficGrid: React.FC<TrafficGridProps> = ({ intersections, vehicles, onIn
                             x={x * CELL_SIZE}
                             y={y * CELL_SIZE}
                             onClick={() => onIntersectionClick(intersection)}
+                            onCameraClick={() => onCameraClick(intersection)}
                         />
                     );
                 })}
